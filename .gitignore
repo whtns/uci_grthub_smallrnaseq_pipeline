@@ -1,7 +1,3 @@
-data/*
-output/*
-results/*
-logs/*
 tmp/*
 .snakemake/
 src/*.out
