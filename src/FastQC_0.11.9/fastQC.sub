@@ -1,0 +1,20 @@
+#!/bin/bash
+#SBATCH --job-name=fastqc
+#SBATCH -A SBSANDME_LAB
+#SBATCH -p standard
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --error=slurm-%x.%j.err
+#SBATCH --output=slurm-%x.%j.out
+
+module load fastqc/0.11.9
+
+fastqc -t 8 /dfs9/ucightf-lab/projects/KnigR/250710_0725Bio-03_KnigR_Revvity-Small-RNA-v4/FastqFiles/*.txt.gz -o /dfs9/ucightf-lab/projects/KnigR/250710_0725Bio-03_KnigR_Revvity-Small-RNA-v4/fastQC
+
+mkdir /dfs9/ucightf-lab/projects/KnigR/250710_0725Bio-03_KnigR_Revvity-Small-RNA-v4/fastQC/html
+
+mv /dfs9/ucightf-lab/projects/KnigR/250710_0725Bio-03_KnigR_Revvity-Small-RNA-v4/fastQC/*.html /dfs9/ucightf-lab/projects/KnigR/250710_0725Bio-03_KnigR_Revvity-Small-RNA-v4/fastQC/html
+
+module unload fastqc/0.11.9
+

@@ -1,0 +1,28 @@
+# SLURM cluster configuration for Snakemake
+# Usage: snakemake --cluster-config cluster.yaml --cluster "sbatch --account={cluster.account} --partition={cluster.partition} --nodes={cluster.nodes} --ntasks={cluster.ntasks} --cpus-per-task={cluster.cpus} --mem={cluster.mem} --time={cluster.time} --output={cluster.output} --error={cluster.error}"
+
+__default__:
+  account: "SBSANDME_LAB"
+  partition: "standard"
+  nodes: 1
+  ntasks: 1
+  cpus: 4
+  mem: "4G"
+  time: "01:00:00"
+  output: "logs/slurm-%x.%j.out"
+  error: "logs/slurm-%x.%j.err"
+
+fastqc_raw:
+  cpus: 8
+  mem: "4G"
+  time: "01:00:00"
+
+cutadapt_trim:
+  cpus: 4
+  mem: "8G"
+  time: "02:00:00"
+
+fastqc_trimmed:
+  cpus: 8
+  mem: "4G"
+  time: "01:00:00"
