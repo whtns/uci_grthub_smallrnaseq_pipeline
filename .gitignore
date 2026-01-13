@@ -4,3 +4,7 @@ src/*.out
 src/*.err
 *.out
 *.err
+*.zip
+*.html
+*.fastq
+*.tar.gz
