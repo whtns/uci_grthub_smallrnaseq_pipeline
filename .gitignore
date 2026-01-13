@@ -6,5 +6,6 @@ src/*.err
 *.err
 *.zip
 *.html
-*.fastq
 *.tar.gz
+*fastq
+multiqc_data/

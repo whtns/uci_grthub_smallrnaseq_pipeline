@@ -216,4 +216,29 @@ rule cutadapt_only:
     input:
         expand("{trimmed_dir}/{sample}.cut.R1.fastq",
                trimmed_dir=TRIMMED_DIR,
-               sample=PAIRED_SAMPLES.keys())
+               sample=PAIRED_SAMPLES.keys(),
+               read_num=[1, 2])
+
+# Rule 6: MultiQC report
+rule multiqc:
+    input:
+        expand(f"{TRIMMED_DIR}/{{sample}}.cut.R1.fastq.gz", sample=SAMPLES),
+        expand(f"{TRIMMED_DIR}/{{sample}}.cut.R2.fastq.gz", sample=SAMPLES),
+        expand(f"{FASTQC_DIR}/trimmed/{{sample}}.cut.R1_fastqc.zip", sample=SAMPLES),
+        expand(f"{FASTQC_DIR}/trimmed/{{sample}}.cut.R2_fastqc.zip", sample=SAMPLES)
+    output:
+        report = "multiqc_report.html"
+    threads: 2
+    resources:
+        mem_mb = 4000,
+        cpus = 2,
+        partition = "standard",
+        account = "sbsandme_lab"
+    shell:
+        """
+        rm multiqc_report.html || true
+        rm -rf multiqc_data || true
+        module load singularity/3.11.3
+        singularity run /dfs9/ucightf-lab/kstachel/TOOLS/multiqc-1.20.sif multiqc . -o .
+        module unload singularity/3.11.3
+        """
