@@ -1,0 +1,182 @@
+#!/usr/bin/env Rscript 
+# DESeq2 analysis script
+# Usage: Rscript deseq2_analysis.R counts.txt metadata.csv output_dir
+
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(tidyverse)
+  library(glue)
+  library(AnnotationDbi)
+  library(yaml)
+  library(iSEEde)
+  library(purrr)
+})
+
+args <- commandArgs(trailingOnly=TRUE)
+default_counts <- "results/miRNA_counts_grouped_on_mature.csv"
+## Defaults (allow running without providing all args)
+default_meta <- "metadata/metadata.csv"
+default_out <- "output/deseq2"
+
+# Use provided counts file if given, otherwise fall back to default
+counts_file <- default_counts
+if(length(args) >= 1 && nzchar(args[1])) counts_file <- args[1]
+
+# meta and out dir: use provided values if present, otherwise use defaults
+meta_file <- default_meta
+if(length(args) >= 2 && nzchar(args[2])) meta_file <- args[2]
+
+out_dir <- default_out
+if(length(args) >= 3 && nzchar(args[3])) out_dir <- args[3]
+condition <- args[4]  # Condition column in metadata
+group_a <- args[5]  # First group for comparison
+group_b <- args[6]  # Second group for comparison
+
+dir.create(out_dir, showWarnings=FALSE)
+
+counts <- read.csv(counts_file, header=TRUE, row.names=1)
+count_matrix <- counts 
+
+meta <- read.csv(meta_file)  |> 
+janitor::clean_names() |>
+dplyr::mutate(condition = condition)  |> 
+dplyr::mutate(sample_name = str_replace_all(sample_name, "-", ".")) |>
+tibble::column_to_rownames("sample_name") |>
+  identity()
+
+colnames(count_matrix) <- rownames(meta)
+
+count_matrix  |> 
+tibble::rownames_to_column("ensgene") |>
+  readr::write_csv(file.path(out_dir, "all_sample_counts.csv"))
+
+print(rownames(meta))
+print(colnames(count_matrix))
+# Ensure sample names match
+count_matrix <- count_matrix[, rownames(meta)]
+
+dds <- DESeqDataSetFromMatrix(countData=count_matrix, 
+  colData=meta, 
+  design=~condition)
+
+dds <- DESeq(dds)
+
+
+# 6. Quality Control and Visualization
+# ----------------------------------------------------------- #
+# Optional: Transform data for visualization
+vsd <- vst(dds, blind = FALSE) # Variance stabilizing transformation
+rld <- rlog(dds, blind = FALSE) # Regularized log transformation
+
+
+plot_var <- c("condition")  |> 
+set_names()
+
+pca_plots <- map(plot_var, ~{plotPCA(rld, intgroup = .x) + labs(title = glue("PCA - {.x}"))})
+
+pdf("results/pca_plots.pdf")
+print(pca_plots)
+dev.off()
+
+comparisons_yaml <- file.path(dirname(meta_file), "comparisons.yaml")
+
+# If a comparisons YAML exists, read it; otherwise create a default and write it.
+if(file.exists(comparisons_yaml)){
+  comparisons <- tryCatch({
+    yaml::read_yaml(comparisons_yaml)
+  }, error = function(e){
+    warning(glue::glue("Failed to read {comparisons_yaml}: {e$message}. Falling back to defaults."))
+    NULL
+  })
+  # validate structure
+  if(is.null(comparisons) || !is.list(comparisons) || length(comparisons) == 0){
+    warning(glue::glue("Invalid comparisons in {comparisons_yaml}; using defaults."))
+    comparisons <- list(c("treated", "control"))
+    try({ yaml::write_yaml(comparisons, comparisons_yaml) }, silent = TRUE)
+  }
+} else {
+  comparisons <- list(c("treated", "control"))
+  dir.create(dirname(meta_file), showWarnings = FALSE, recursive = TRUE)
+  tryCatch({
+    yaml::write_yaml(comparisons, comparisons_yaml)
+    message(glue::glue("Wrote comparisons to {comparisons_yaml}"))
+  }, error = function(e){
+    warning(glue::glue("Failed to write comparisons YAML: {e$message}"))
+  })
+}
+
+# Iterate over defined comparisons, extract results for each, and save RDS + CSV
+safe_filename <- function(x){
+  x <- stringr::str_replace_all(x, "\\+", "plus")
+  x <- stringr::str_replace_all(x, "[^A-Za-z0-9_-]", "_")
+  tolower(x)
+}
+
+all_res_list <- list()
+for(cmp in comparisons){
+  group_a <- cmp[1]
+  group_b <- cmp[2]
+
+  message(glue::glue("Extracting results: {group_a} vs {group_b}"))
+
+  # results() uses contrast = c("factorName","level1","level2")
+  res_i <- tryCatch(
+    results(dds, contrast = c("condition", group_a, group_b)),
+    error = function(e){
+      warning(glue::glue("Failed to get results for {group_a} vs {group_b}: {e$message}"))
+      NULL
+    }
+  )
+
+  if(is.null(res_i)) next
+  # filter out rows where pvalue is NA
+  res_df0 <- as.data.frame(res_i)
+  if("pvalue" %in% colnames(res_df0)){
+    res_df <- res_df0[!is.na(res_df0$pvalue), , drop = FALSE]
+  } else {
+    res_df <- res_df0
+  }
+
+  if(nrow(res_df) == 0){
+    message(glue::glue("No rows with non-NA pvalue for {group_a} vs {group_b}; skipping."))
+    next
+  }
+
+  nm <- glue::glue("{group_a}_vs_{group_b}") %>% safe_filename()
+  rds_path <- file.path(out_dir, glue::glue("results_{nm}.rds"))
+  csv_path <- file.path(out_dir, glue::glue("results_{nm}.csv"))
+
+  # save filtered results: save RDS as DESeqResults subset and CSV as data.frame
+  keep_idx <- rownames(res_df)
+  res_i_filt <- tryCatch(res_i[keep_idx, ], error = function(e) res_i)
+  saveRDS(res_i_filt, file = rds_path)
+
+  # store for combined table (add contrast column)
+  df_i <- res_df
+  df_i$miRNA <- rownames(df_i)
+  df_i$contrast <- glue::glue("{group_a}_vs_{group_b}")
+
+  # reorder columns: miRNA first, then everything else
+  other_cols <- setdiff(colnames(df_i), c("miRNA"))
+  df_i <- df_i[, c("miRNA", other_cols), drop = FALSE]
+
+  # sort by increasing padj (NA last) if padj column exists
+  if("padj" %in% colnames(df_i)){
+    df_i <- df_i[order(df_i$padj, na.last = TRUE), , drop = FALSE]
+  }
+
+  write.csv(df_i, file = csv_path, row.names = FALSE)
+  all_res_list[[nm]] <- df_i
+}
+
+# Save combined results if any
+if(length(all_res_list) > 0){
+  combined <- dplyr::bind_rows(all_res_list)
+  if("padj" %in% colnames(combined)){
+    combined <- combined[order(combined$padj, na.last = TRUE), , drop = FALSE]
+  }
+  write.csv(combined, file = file.path(out_dir, "results_all_contrasts.csv"), row.names = FALSE)
+}
+
+# Save the full DESeq dataset for downstream use
+saveRDS(dds, file=file.path(out_dir, "dds.rds"))
