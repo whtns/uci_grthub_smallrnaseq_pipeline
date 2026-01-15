@@ -117,8 +117,7 @@ rule cutadapt_trim:
         trimmed_dir = TRIMMED_DIR
     threads: 4
     resources:
-        mem_mb = 8000,
-        runtime = 120
+        mem_mb = 24000
     log:
         LOGS_DIR + "/cutadapt/{sample}.log"
     shell:
