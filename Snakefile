@@ -55,6 +55,7 @@ for sample in PAIRED_SAMPLES:
 # Define all output files
 rule all:
     input:
+        "multiqc_report.html",
         # FastQC outputs for raw R1 files
         expand("{fastqc_dir}/html/{sample}-R1_fastqc.html",
                fastqc_dir=FASTQC_DIR,
@@ -102,18 +103,54 @@ rule fastqc_raw:
         module unload fastqc/0.11.9
         """
 
-# Rule to trim adapters using Cutadapt on R1 only
-rule cutadapt_trim:
+# Rule to trim adapters using Cutadapt on R1 only (v3 - commented out, use v4 instead)
+# rule cutadapt_trim_v3:
+#     input:
+#         r1 = lambda wildcards: PAIRED_SAMPLES[wildcards.sample]
+#     output:
+#         trimmed_r1 = TRIMMED_DIR + "/{sample}.cut.R1.fastq"
+#     params:
+#         adapter_1 = "CTGTCTCTTATACACATCT",
+#         adapter_2 = "TGGAATTCTCGGGTGCCAAGG",
+#         min_length = 15,
+#         trim_5 = 4,
+#         trim_3 = 4,
+#         trimmed_dir = TRIMMED_DIR
+#     threads: 4
+#     resources:
+#         mem_mb = 24000
+#     log:
+#         LOGS_DIR + "/cutadapt/{sample}.log"
+#     shell:
+#         """
+#         module load cutadapt/2.10
+#         
+#         # Create output directory
+#         mkdir -p {params.trimmed_dir}
+#         
+#         # Trim adapters using cutadapt
+#         cutadapt -a {params.adapter_1} \
+#             -a {params.adapter_2} \
+#             -m {params.min_length} \
+#             -u {params.trim_5} \
+#             -u -{params.trim_3} \
+#             --output {output.trimmed_r1} \
+#             --cores {threads} \
+#             {input.r1} > {log} 2>&1
+#         
+#         module unload cutadapt/2.10
+#         """
+
+# Rule to trim adapters using Cutadapt on R1 only (small RNA v4 kit)
+rule cutadapt_trim_v4:
     input:
         r1 = lambda wildcards: PAIRED_SAMPLES[wildcards.sample]
     output:
         trimmed_r1 = TRIMMED_DIR + "/{sample}.cut.R1.fastq"
     params:
-        adapter_1 = "CTGTCTCTTATACACATCT",
-        adapter_2 = "TGGAATTCTCGGGTGCCAAGG",
-        min_length = 15,
-        trim_5 = 4,
-        trim_3 = 4,
+        adapter = "TGGAATTCTCGGGTGCCAAGG",
+        min_length = 16,
+        quality_cutoff = 20,
         trimmed_dir = TRIMMED_DIR
     threads: 4
     resources:
@@ -127,18 +164,17 @@ rule cutadapt_trim:
         # Create output directory
         mkdir -p {params.trimmed_dir}
         
-        # Trim adapters using cutadapt
-        cutadapt -a {params.adapter_1} \
-            -a {params.adapter_2} \
-            -m {params.min_length} \
-            -u {params.trim_5} \
-            -u -{params.trim_3} \
+        # Revvity small RNA v4 kit - trim adapter from R1 only
+        cutadapt --quality-cutoff {params.quality_cutoff} \
+            --adapter {params.adapter} \
             --output {output.trimmed_r1} \
+            --minimum-length {params.min_length} \
             --cores {threads} \
             {input.r1} > {log} 2>&1
         
         module unload cutadapt/2.10
         """
+
 
 # Rule to run FastQC on trimmed R1 files
 rule fastqc_trimmed:
@@ -215,16 +251,26 @@ rule cutadapt_only:
     input:
         expand("{trimmed_dir}/{sample}.cut.R1.fastq",
                trimmed_dir=TRIMMED_DIR,
-               sample=PAIRED_SAMPLES.keys(),
-               read_num=[1, 2])
+               sample=PAIRED_SAMPLES.keys())
 
 # Rule 6: MultiQC report
 rule multiqc:
     input:
-        expand(f"{TRIMMED_DIR}/{{sample}}.cut.R1.fastq.gz", sample=SAMPLES),
-        expand(f"{TRIMMED_DIR}/{{sample}}.cut.R2.fastq.gz", sample=SAMPLES),
-        expand(f"{FASTQC_DIR}/trimmed/{{sample}}.cut.R1_fastqc.zip", sample=SAMPLES),
-        expand(f"{FASTQC_DIR}/trimmed/{{sample}}.cut.R2_fastqc.zip", sample=SAMPLES)
+        # Depend on trimmed R1 FASTQ outputs
+        expand("{trimmed_dir}/{sample}.cut.R1.fastq",
+               trimmed_dir=TRIMMED_DIR,
+               sample=PAIRED_SAMPLES.keys()),
+        # Depend on FastQC zips (raw and trimmed) for MultiQC aggregation
+        expand("{fastqc_dir}/{sample}-R1_fastqc.zip",
+               fastqc_dir=FASTQC_DIR,
+               sample=PAIRED_SAMPLES.keys()),
+        # expand("{fastqc_trim_dir}/{sample}.cut.R1_fastqc.zip",
+        #        fastqc_trim_dir=FASTQC_DIR + "/trimmed",
+        #        sample=PAIRED_SAMPLES.keys()),
+        # Include cutadapt logs for MultiQC cutadapt module
+        expand("{logs_dir}/cutadapt/{sample}.log",
+               logs_dir=LOGS_DIR,
+               sample=PAIRED_SAMPLES.keys())
     output:
         report = "multiqc_report.html"
     threads: 2
