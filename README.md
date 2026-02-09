@@ -10,7 +10,7 @@ The workflow performs the following steps:
 3. **FastQC analysis** on trimmed files
 4. **Summary report** generation
 
-![](rulegraph.png}
+![](rulegraph.png)
 
 ## Files Structure
 
