@@ -4,7 +4,7 @@ library(fs)
 library(janitor)
 library(datapasta)
 
-long_counts_table <- dir_ls("output/clc_genomics", glob = "*mature*")  |> 
+long_counts_table <- dir_ls("output/clc_genomics/v25", glob = "*mature*")  |> 
     map_df(~{
         read_csv(.x) |>
         mutate(sample = path_file(.x) |> str_remove(".cut.R1.*"))
@@ -22,4 +22,4 @@ counts_wide <-
 
 counts_wide[is.na(counts_wide)] <- 0
 
-write_csv(counts_wide, "results/miRNA_counts_grouped_on_mature_wide.csv")
+write_csv(counts_wide, "results/miRNA_counts_grouped_on_mature.csv")

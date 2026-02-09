@@ -48,9 +48,9 @@ for fastq_file in FASTQ_FILES:
 PAIRED_SAMPLES = {k: v["R1"] for k, v in SAMPLES.items() 
                   if "R1" in v}
 
-print(f"Found {len(PAIRED_SAMPLES)} R1 samples:")
+print(f"Found {len(PAIRED_SAMPLES)} R1 samples:", file=sys.stderr)
 for sample in PAIRED_SAMPLES:
-    print(f"  - {sample}")
+    print(f"  - {sample}", file=sys.stderr)
 
 # Define all output files
 rule all:

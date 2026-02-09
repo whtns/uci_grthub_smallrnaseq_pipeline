@@ -1,6 +1,44 @@
 #!/usr/bin/env Rscript 
-# DESeq2 analysis script
-# Usage: Rscript deseq2_analysis.R counts.txt metadata.csv output_dir
+# DESeq2 analysis script for miRNA differential expression
+#
+# USAGE:
+#   Rscript laspada_analysis.R [counts_file] [metadata_file] [output_dir]
+#
+# ARGUMENTS (all optional):
+#   counts_file    - CSV file with miRNA counts (rows=miRNAs, cols=samples)
+#                    Default: results/miRNA_counts_grouped_on_mature.csv
+#   metadata_file  - CSV file with sample metadata (must have sample_name column)
+#                    Default: metadata/metadata.csv
+#   output_dir     - Directory for output files
+#                    Default: output/deseq2
+#
+# COMPARISONS:
+#   Comparisons are defined in metadata/comparisons.yaml
+#   Format: list of [group_a, group_b] pairs, e.g.:
+#     - [control, treated]
+#     - [control, diseased]
+#   If file doesn't exist, defaults to: - [control, treated]
+#
+# OUTPUTS:
+#   - dds.rds: DESeq2 dataset object
+#   - all_sample_counts.csv: normalized counts for all samples
+#   - results_<comparison>.csv: DE results for each comparison
+#   - results_<comparison>.rds: DESeqResults object for each comparison
+#   - results_all_contrasts.csv: combined results from all comparisons
+#   - results/pca_plots.pdf: PCA plots
+#
+# EXAMPLES:
+#   # Run with all defaults
+#   Rscript laspada_analysis.R
+#
+#   # Custom counts file only
+#   Rscript laspada_analysis.R my_counts.csv
+#
+#   # Custom counts and metadata
+#   Rscript laspada_analysis.R my_counts.csv my_metadata.csv
+#
+#   # All custom
+#   Rscript laspada_analysis.R my_counts.csv my_metadata.csv custom_output/
 
 suppressPackageStartupMessages({
   library(DESeq2)
@@ -28,26 +66,57 @@ if(length(args) >= 2 && nzchar(args[2])) meta_file <- args[2]
 
 out_dir <- default_out
 if(length(args) >= 3 && nzchar(args[3])) out_dir <- args[3]
-condition <- args[4]  # Condition column in metadata
-group_a <- args[5]  # First group for comparison
-group_b <- args[6]  # Second group for comparison
+
+# Optional arguments for condition column name and specific groups
+condition_col <- args[4]  # Optional: condition column name in metadata
+if(is.na(condition_col) || !nzchar(condition_col)) condition_col <- "condition"
 
 dir.create(out_dir, showWarnings=FALSE)
 
-counts <- read.csv(counts_file, header=TRUE, row.names=1)
-count_matrix <- counts 
+counts <- read.csv(counts_file, header=TRUE, check.names=FALSE)
+
+# Use name column as row identifiers (these are the miRNA names)
+if("name" %in% colnames(counts)){
+  count_matrix <- counts[, setdiff(colnames(counts), c("feature_id", "name")), drop=FALSE]
+  row_ids <- counts$name
+  # Make row names unique by appending sequence number if duplicates exist
+  row_ids <- make.unique(row_ids, sep=".")
+  rownames(count_matrix) <- row_ids
+} else if("feature_id" %in% colnames(counts)){
+  count_matrix <- counts[, -which(colnames(counts) %in% c("feature_id")), drop=FALSE]
+  row_ids <- counts$feature_id
+  row_ids <- make.unique(row_ids, sep=".")
+  rownames(count_matrix) <- row_ids
+} else {
+  # Use first column as row names
+  count_matrix <- counts[, -1, drop=FALSE]
+  row_ids <- make.unique(as.character(counts[[1]]), sep=".")
+  rownames(count_matrix) <- row_ids
+}
+
+# Ensure numeric matrix
+count_matrix <- as.matrix(count_matrix)
+mode(count_matrix) <- "integer" 
 
 meta <- read.csv(meta_file)  |> 
 janitor::clean_names() |>
-dplyr::mutate(condition = condition)  |> 
 dplyr::mutate(sample_name = str_replace_all(sample_name, "-", ".")) |>
 tibble::column_to_rownames("sample_name") |>
   identity()
 
+# Ensure the condition column exists
+if(!condition_col %in% colnames(meta)){
+  stop(glue::glue("Condition column '{condition_col}' not found in metadata. Available columns: {paste(colnames(meta), collapse=', ')}"))
+}
+
+# Convert condition column to factor if it isn't already
+meta[[condition_col]] <- factor(meta[[condition_col]])
+
 colnames(count_matrix) <- rownames(meta)
 
-count_matrix  |> 
-tibble::rownames_to_column("ensgene") |>
+# Write normalized counts before converting to matrix
+count_df <- as.data.frame(count_matrix) |> 
+  tibble::rownames_to_column("miRNA") |>
   readr::write_csv(file.path(out_dir, "all_sample_counts.csv"))
 
 print(rownames(meta))
@@ -55,9 +124,11 @@ print(colnames(count_matrix))
 # Ensure sample names match
 count_matrix <- count_matrix[, rownames(meta)]
 
+# Create design formula dynamically
+design_formula <- as.formula(paste0("~", condition_col))
 dds <- DESeqDataSetFromMatrix(countData=count_matrix, 
   colData=meta, 
-  design=~condition)
+  design=design_formula)
 
 dds <- DESeq(dds)
 
@@ -65,16 +136,20 @@ dds <- DESeq(dds)
 # 6. Quality Control and Visualization
 # ----------------------------------------------------------- #
 # Optional: Transform data for visualization
-vsd <- vst(dds, blind = FALSE) # Variance stabilizing transformation
-rld <- rlog(dds, blind = FALSE) # Regularized log transformation
+# Try VST first, fall back to rlog if there are too few genes
+transformed_data <- tryCatch({
+  vst(dds, blind = FALSE) # Variance stabilizing transformation
+}, error = function(e){
+  message(glue::glue("VST failed: {e$message}. Using rlog instead."))
+  rlog(dds, blind = FALSE)
+})
 
-
-plot_var <- c("condition")  |> 
+plot_var <- c(condition_col) |> 
 set_names()
 
-pca_plots <- map(plot_var, ~{plotPCA(rld, intgroup = .x) + labs(title = glue("PCA - {.x}"))})
+pca_plots <- map(plot_var, ~{plotPCA(transformed_data, intgroup = .x) + labs(title = glue("PCA - {.x}"))})
 
-pdf("results/pca_plots.pdf")
+pdf(file.path(out_dir, "pca_plots.pdf"))
 print(pca_plots)
 dev.off()
 
@@ -91,11 +166,11 @@ if(file.exists(comparisons_yaml)){
   # validate structure
   if(is.null(comparisons) || !is.list(comparisons) || length(comparisons) == 0){
     warning(glue::glue("Invalid comparisons in {comparisons_yaml}; using defaults."))
-    comparisons <- list(c("treated", "control"))
+    comparisons <- list(c("control", "treated"))
     try({ yaml::write_yaml(comparisons, comparisons_yaml) }, silent = TRUE)
   }
 } else {
-  comparisons <- list(c("treated", "control"))
+  comparisons <- list(c("control", "treated"))
   dir.create(dirname(meta_file), showWarnings = FALSE, recursive = TRUE)
   tryCatch({
     yaml::write_yaml(comparisons, comparisons_yaml)
@@ -121,7 +196,7 @@ for(cmp in comparisons){
 
   # results() uses contrast = c("factorName","level1","level2")
   res_i <- tryCatch(
-    results(dds, contrast = c("condition", group_a, group_b)),
+    results(dds, contrast = c(condition_col, group_a, group_b)),
     error = function(e){
       warning(glue::glue("Failed to get results for {group_a} vs {group_b}: {e$message}"))
       NULL
@@ -129,13 +204,13 @@ for(cmp in comparisons){
   )
 
   if(is.null(res_i)) next
-  # # filter out rows where pvalue is NA
-  # res_df0 <- as.data.frame(res_i)
-  # if("pvalue" %in% colnames(res_df0)){
-  #   res_df <- res_df0[!is.na(res_df0$pvalue), , drop = FALSE]
-  # } else {
-  #   res_df <- res_df0
-  # }
+  # filter out rows where pvalue is NA
+  res_df0 <- as.data.frame(res_i)
+  if("pvalue" %in% colnames(res_df0)){
+    res_df <- res_df0[!is.na(res_df0$pvalue), , drop = FALSE]
+  } else {
+    res_df <- res_df0
+  }
 
   if(nrow(res_df) == 0){
     message(glue::glue("No rows with non-NA pvalue for {group_a} vs {group_b}; skipping."))

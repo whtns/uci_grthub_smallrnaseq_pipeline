@@ -2,6 +2,47 @@
 """
 Generate a project report for small RNA sequencing data
 with metadata extracted from FASTQ files.
+
+USAGE:
+    python generate_report.py [OPTIONS]
+
+OPTIONS:
+    --fastq-dir DIR           Path to FASTQ directory
+                              Default: data/FASTQ
+    
+    --output FILE             Output PDF path
+                              Default: SmallRNA_Project_Report.pdf
+    
+    --author NAME             Report author name
+                              Default: Kevin Stachelek
+    
+    --clc-version VERSION     CLC Genomics Workbench version
+                              Default: v25
+    
+    --library-kit KIT         Library kit used for sequencing
+                              Default: Revvity NEXTflex Small RNA v4
+
+OUTPUTS:
+    - PDF report with project information, summary statistics, pipeline details,
+      sample information, and references
+
+EXAMPLES:
+    # Generate report with all defaults
+    python generate_report.py
+    
+    # Custom FASTQ directory and output path
+    python generate_report.py --fastq-dir /path/to/fastq --output custom_report.pdf
+    
+    # Custom author and CLC version
+    python generate_report.py --author "Jane Doe" --clc-version v24
+    
+    # All custom options
+    python generate_report.py --fastq-dir data/FASTQ --output report.pdf \\
+        --author "John Smith" --clc-version v25 --library-kit "Revvity NEXTflex Small RNA v4"
+
+REQUIREMENTS:
+    - reportlab: for PDF generation
+    - Python 3.6+
 """
 
 import os
