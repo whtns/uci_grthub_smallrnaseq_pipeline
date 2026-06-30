@@ -15,13 +15,18 @@ import glob
 from pathlib import Path
 
 # Configuration
-configfile: "config.yaml"
+# Select the library-prep kit by pointing at the matching sub-config:
+#   config_v3.yaml  -> Bioo Scientific NEXTFLEX Small RNA-Seq v3 (4N randomers)
+#   config_v4.yaml  -> Revvity NEXTFLEX Small RNA-Seq v4 (no end trimming)
+configfile: "config_v3.yaml"
 
 # Define base paths
+# Inputs live under data/; all generated outputs go under OUTPUT_DIR.
 FASTQ_DIR = "data/FASTQ"
-FASTQC_DIR = "fastQC"
-TRIMMED_DIR = "trimmed_fastq"
-LOGS_DIR = "logs"
+OUTPUT_DIR = "output"
+FASTQC_DIR = OUTPUT_DIR + "/fastQC"
+TRIMMED_DIR = OUTPUT_DIR + "/trimmed_fastq"
+LOGS_DIR = OUTPUT_DIR + "/logs"
 
 # Get all FASTQ files matching the pattern
 FASTQ_FILES = glob.glob(f"{FASTQ_DIR}/*fastq.gz")
@@ -55,7 +60,7 @@ for sample in PAIRED_SAMPLES:
 # Define all output files
 rule all:
     input:
-        "multiqc_report.html",
+        OUTPUT_DIR + "/multiqc_report.html",
         # FastQC outputs for raw R1 files
         expand("{fastqc_dir}/html/{sample}-R1_fastqc.html",
                fastqc_dir=FASTQC_DIR,
@@ -141,18 +146,27 @@ rule fastqc_raw:
 #         module unload cutadapt/2.10
 #         """
 
-# Rule to trim adapters using Cutadapt on R1 only (small RNA v4 kit)
-rule cutadapt_trim_v4:
+# Rule to trim adapters using Cutadapt on R1 only.
+# Kit-specific behavior is driven by the active configfile (config_v3 / config_v4):
+#   - adapter, min_length, quality_cutoff
+#   - trim_5 / trim_3: fixed bases removed from each end AFTER adapter trimming
+#     (v3 = 4/4 for the 4N randomized adapters; v4 = 0/0)
+# IMPORTANT: cutadapt applies -u (--cut) BEFORE adapter trimming, so for the v3
+# randomers we must trim the adapter first, then remove the flanking bases in a
+# second pass; otherwise -u -N would cut into the adapter instead of the insert.
+rule cutadapt_trim:
     input:
         r1 = lambda wildcards: PAIRED_SAMPLES[wildcards.sample]
     output:
         trimmed_r1 = TRIMMED_DIR + "/{sample}.cut.R1.fastq"
     params:
-        adapter = "TGGAATTCTCGGGTGCCAAGG",
-        min_length = 16,
-        quality_cutoff = 20,
+        adapter = config["adapters"]["read1"],
+        min_length = config["cutadapt"]["min_length"],
+        quality_cutoff = config["cutadapt"]["quality_cutoff"],
+        trim_5 = config["cutadapt"]["trim_5"],
+        trim_3 = config["cutadapt"]["trim_3"],
         trimmed_dir = TRIMMED_DIR
-    threads: 4
+    threads: config["cutadapt"]["cores"]
     resources:
         mem_mb = 24000
     log:
@@ -160,18 +174,34 @@ rule cutadapt_trim_v4:
     shell:
         """
         module load cutadapt/2.10
-        
+
         # Create output directory
         mkdir -p {params.trimmed_dir}
-        
-        # Revvity small RNA v4 kit - trim adapter from R1 only
-        cutadapt --quality-cutoff {params.quality_cutoff} \
-            --adapter {params.adapter} \
-            --output {output.trimmed_r1} \
-            --minimum-length {params.min_length} \
-            --cores {threads} \
-            {input.r1} > {log} 2>&1
-        
+
+        if [ {params.trim_5} -gt 0 ] || [ {params.trim_3} -gt 0 ]; then
+            # Two-pass (e.g. NEXTFLEX v3): adapter first, then remove randomers.
+            tmp="{output.trimmed_r1}.adapt.tmp"
+            cutadapt --quality-cutoff {params.quality_cutoff} \
+                --adapter {params.adapter} \
+                --cores {threads} \
+                --output "$tmp" \
+                {input.r1} > {log} 2>&1
+            cutadapt -u {params.trim_5} -u -{params.trim_3} \
+                --minimum-length {params.min_length} \
+                --cores {threads} \
+                --output {output.trimmed_r1} \
+                "$tmp" >> {log} 2>&1
+            rm -f "$tmp"
+        else
+            # Single-pass (e.g. v4): no randomer end-trimming.
+            cutadapt --quality-cutoff {params.quality_cutoff} \
+                --adapter {params.adapter} \
+                --minimum-length {params.min_length} \
+                --cores {threads} \
+                --output {output.trimmed_r1} \
+                {input.r1} > {log} 2>&1
+        fi
+
         module unload cutadapt/2.10
         """
 
@@ -216,7 +246,7 @@ rule create_summary:
                trimmed_dir=TRIMMED_DIR,
                sample=PAIRED_SAMPLES.keys())
     output:
-        "processing_summary.txt"
+        OUTPUT_DIR + "/processing_summary.txt"
     params:
         sample_list = list(PAIRED_SAMPLES.keys()),
         fastqc_dir = FASTQC_DIR,
@@ -272,7 +302,9 @@ rule multiqc:
                logs_dir=LOGS_DIR,
                sample=PAIRED_SAMPLES.keys())
     output:
-        report = "multiqc_report.html"
+        report = OUTPUT_DIR + "/multiqc_report.html"
+    params:
+        output_dir = OUTPUT_DIR
     threads: 2
     resources:
         mem_mb = 4000,
@@ -281,9 +313,10 @@ rule multiqc:
         account = "sbsandme_lab"
     shell:
         """
-        rm multiqc_report.html || true
-        rm -rf multiqc_data || true
+        rm -f {params.output_dir}/multiqc_report.html || true
+        rm -rf {params.output_dir}/multiqc_data || true
         module load singularity/3.11.3
-        singularity run /dfs9/ucightf-lab/kstachel/TOOLS/multiqc-1.20.sif multiqc . -o .
+        singularity run /dfs9/ucightf-lab/kstachel/TOOLS/multiqc-1.20.sif \
+            multiqc {params.output_dir} -o {params.output_dir}
         module unload singularity/3.11.3
         """

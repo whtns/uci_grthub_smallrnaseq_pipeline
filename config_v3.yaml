@@ -1,0 +1,46 @@
+# Configuration: Bioo Scientific NEXTFLEX Small RNA-Seq Kit v3
+# Usage: snakemake --configfile config_v3.yaml ...
+
+kit: "v3"
+
+# Adapter sequences
+adapters:
+  read1: "TGGAATTCTCGGGTGCCAAGG"
+  read2: "AGATCGGAAGAGCGTCGTGTAGGGAAAGA"
+
+# Cutadapt parameters
+# v3 uses 4N randomized adapters -> remove 4 random bases from each end
+# AFTER 3' adapter trimming (first 4 bases and last 4 bases of the insert).
+cutadapt:
+  min_length: 16
+  quality_cutoff: 20
+  trim_5: 4          # bases to remove from 5' end after adapter trimming
+  trim_3: 4          # bases to remove from 3' end after adapter trimming
+  cores: 4
+
+# FastQC parameters
+fastqc:
+  threads: 8
+
+# Resource allocation
+resources:
+  fastqc:
+    mem_mb: 4000
+    runtime: 60  # minutes
+  cutadapt:
+    mem_mb: 8000
+    runtime: 120  # minutes
+
+# Directory structure
+directories:
+  fastq_dir: "data/FASTQ"
+  fastqc_dir: "fastQC"
+  trimmed_dir: "trimmed_fastq"
+  logs_dir: "logs"
+
+# SLURM cluster configuration (optional)
+cluster:
+  account: "SBSANDME_LAB"
+  partition: "standard"
+  nodes: 1
+  ntasks: 1

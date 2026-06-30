@@ -1,0 +1,45 @@
+# Configuration: Revvity/PerkinElmer NEXTFLEX Small RNA-Seq Kit v4
+# Usage: snakemake --configfile config_v4.yaml ...
+
+kit: "v4"
+
+# Adapter sequences
+adapters:
+  read1: "TGGAATTCTCGGGTGCCAAGG"
+  read2: "AGATCGGAAGAGCGTCGTGTAGGGAAAGA"
+
+# Cutadapt parameters
+# v4 does NOT use randomized adapters -> no fixed-base end trimming
+cutadapt:
+  min_length: 16
+  quality_cutoff: 20
+  trim_5: 0          # bases to remove from 5' end after adapter trimming
+  trim_3: 0          # bases to remove from 3' end after adapter trimming
+  cores: 4
+
+# FastQC parameters
+fastqc:
+  threads: 8
+
+# Resource allocation
+resources:
+  fastqc:
+    mem_mb: 4000
+    runtime: 60  # minutes
+  cutadapt:
+    mem_mb: 8000
+    runtime: 120  # minutes
+
+# Directory structure
+directories:
+  fastq_dir: "data/FASTQ"
+  fastqc_dir: "fastQC"
+  trimmed_dir: "trimmed_fastq"
+  logs_dir: "logs"
+
+# SLURM cluster configuration (optional)
+cluster:
+  account: "SBSANDME_LAB"
+  partition: "standard"
+  nodes: 1
+  ntasks: 1

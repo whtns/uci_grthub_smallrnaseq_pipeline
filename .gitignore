@@ -9,3 +9,4 @@ src/*.err
 *.tar.gz
 *fastq
 multiqc_data/
+.codetree
