@@ -320,3 +320,60 @@ rule multiqc:
             multiqc {params.output_dir} -o {params.output_dir}
         module unload singularity/3.11.3
         """
+
+# ---------------------------------------------------------------------------
+# Post-CLC reporting
+#
+# The workflow is interrupted after `multiqc`: the trimmed R1 FASTQs
+# (output/trimmed_fastq) are imported into QIAGEN CLC Genomics Workbench (a GUI
+# program) and quantified against miRBase. CLC exports per-sample
+# "grouped on mature" CSVs into CLC_DIR. The rules below resume from those
+# exports and are NOT part of `rule all`; run them once the CLC step is done:
+#
+#     snakemake report --cores 1
+# ---------------------------------------------------------------------------
+CLC_DIR = OUTPUT_DIR + "/clc_genomics/v25"
+RESULTS_DIR = "results"
+CLC_MATURE_CSVS = glob.glob(f"{CLC_DIR}/*grouped on mature*.csv")
+
+# Combine the per-sample CLC miRNA quantifications into long and wide count
+# tables. src/parse_miRNA_out.r reads CLC_DIR and writes to RESULTS_DIR (both
+# paths are hard-coded in that script).
+rule parse_mirna:
+    input:
+        CLC_MATURE_CSVS
+    output:
+        long = RESULTS_DIR + "/miRNA_counts_grouped_on_mature_long.csv",
+        wide = RESULTS_DIR + "/miRNA_counts_grouped_on_mature.csv"
+    log:
+        LOGS_DIR + "/parse_mirna.log"
+    shell:
+        # R + tidyverse/fs/janitor/datapasta are provided by the pixi env
+        # (run via `pixi run parse`), so no `module load R` here.
+        """
+        Rscript src/parse_miRNA_out.r > {log} 2>&1
+        """
+
+# Generate the project summary PDF: pipeline description, per-sample metadata
+# extracted from the raw FASTQs, and references. Depends on the MultiQC report
+# and parsed counts so it only builds once the full project is complete.
+rule report:
+    input:
+        multiqc = OUTPUT_DIR + "/multiqc_report.html",
+        counts = RESULTS_DIR + "/miRNA_counts_grouped_on_mature.csv"
+    output:
+        pdf = OUTPUT_DIR + "/SmallRNA_Project_Report.pdf"
+    params:
+        fastq_dir = FASTQ_DIR,
+        clc_version = "v25",
+        library_kit = config.get("library_kit", "Revvity NEXTflex Small RNA v4")
+    log:
+        LOGS_DIR + "/report.log"
+    shell:
+        """
+        python3 src/generate_report.py \
+            --fastq-dir {params.fastq_dir} \
+            --output {output.pdf} \
+            --clc-version {params.clc_version} \
+            --library-kit "{params.library_kit}" > {log} 2>&1
+        """

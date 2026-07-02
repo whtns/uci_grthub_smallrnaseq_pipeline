@@ -10,3 +10,6 @@ src/*.err
 *fastq
 multiqc_data/
 .codetree
+
+# pixi: track pixi.toml + pixi.lock, ignore the materialized env
+.pixi/

@@ -8,7 +8,21 @@ The workflow performs the following steps:
 1. **FastQC analysis** on raw FASTQ files
 2. **Adapter trimming** using Cutadapt with small RNA v4 kit specific adapters
 3. **FastQC analysis** on trimmed files
-4. **Summary report** generation
+4. **MultiQC** aggregate report
+5. *(manual)* **miRNA quantification** in QIAGEN CLC Genomics Workbench (GUI)
+6. **Parse CLC output** into combined count tables (`parse_mirna`)
+7. **Project summary PDF** generation (`report`)
+
+> **Note:** the pipeline is interrupted after MultiQC by a manual GUI step
+> (CLC Genomics Workbench), which exports per-sample "grouped on mature" CSVs to
+> `output/clc_genomics/v25/`. The `parse_mirna` and `report` rules resume from
+> those exports and are not part of the default `snakemake` (`rule all`) run:
+>
+> ```bash
+> # After the CLC step is complete:
+> snakemake parse_mirna --cores 1   # combine CLC CSVs -> results/*.csv
+> snakemake report --cores 1        # -> output/SmallRNA_Project_Report.pdf
+> ```
 
 ![](rulegraph.png)
 

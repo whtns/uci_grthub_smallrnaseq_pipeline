@@ -1,0 +1,38 @@
+[workspace]
+name = "acham-mirna-smallrna"
+version = "0.1.0"
+description = "Small RNA-seq miRNA processing workflow (Snakemake) for the AchaM project"
+authors = ["Kevin Stachelek"]
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+
+# Pixi provides the workflow *runner* and the tools Snakemake launches directly:
+#   - snakemake            : drives the whole pipeline
+#   - reportlab (+ python) : `report` rule -> src/generate_report.py
+#   - r-base + packages    : `parse_mirna` rule -> src/parse_miRNA_out.r
+#
+# The heavier NGS tools stay on the HPC environment-module system (the rule
+# shell blocks still `module load` them): fastqc, cutadapt, and the
+# singularity-packaged multiqc.
+[dependencies]
+snakemake-minimal = ">=9,<10"
+
+# `report` rule
+python = ">=3.11"
+reportlab = ">=4"
+
+# `parse_mirna` rule
+r-base = ">=4.4"
+r-tidyverse = "*"
+r-fs = "*"
+r-janitor = "*"
+r-datapasta = "*"
+
+[tasks]
+# Default pre-CLC run (FastQC -> cutadapt -> MultiQC). Uses HPC modules inside
+# the rules; run on a compute node / via submit_workflow.sh for real work.
+run = "snakemake --cores 4"
+dry = "snakemake -n"
+# Post-CLC steps (run once CLC Genomics has exported the mature CSVs):
+parse = "snakemake parse_mirna --cores 1"
+report = "snakemake report --cores 1"
