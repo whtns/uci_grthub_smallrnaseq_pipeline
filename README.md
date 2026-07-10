@@ -40,9 +40,26 @@ The workflow performs the following steps:
 └── logs/                   # Log files
 ```
 
+## Installation
+
+```bash
+git clone https://github.com/uci-grthub/uci_grthub_smallrnaseq_pipeline.git
+cd uci_grthub_smallrnaseq_pipeline
+```
+
+Snakemake, the `report` rule's Python/reportlab deps, and the `parse_mirna` rule's
+R/tidyverse deps are pinned in `pixi.toml`. Install once with [pixi](https://pixi.sh):
+
+```bash
+pixi install
+```
+
+FastQC, Cutadapt, and MultiQC stay on the HPC environment-module system and are
+`module load`ed inside the rule shell blocks — pixi does not provision them.
+
 ## Requirements
 
-- Snakemake (>=6.0)
+- Snakemake (>=6.0) — via `pixi install`, or `conda install -c conda-forge -c bioconda snakemake`
 - FastQC (0.11.9)
 - Cutadapt (2.10)
 - SLURM job scheduler (for cluster execution)
@@ -53,10 +70,10 @@ The workflow performs the following steps:
 
 ```bash
 # Dry run to check workflow
-snakemake -n
+pixi run dry          # or: snakemake -n
 
 # Run with 4 cores
-snakemake --cores 4
+pixi run run           # or: snakemake --cores 4
 
 # Run only FastQC analysis
 snakemake fastqc_only --cores 4
